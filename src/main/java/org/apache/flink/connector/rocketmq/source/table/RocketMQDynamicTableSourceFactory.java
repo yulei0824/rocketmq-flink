@@ -59,6 +59,8 @@ public class RocketMQDynamicTableSourceFactory implements DynamicTableSourceFact
         Set<ConfigOption<?>> requiredOptions = new HashSet<>();
         requiredOptions.add(RocketMQSourceOptions.TOPIC);
         requiredOptions.add(RocketMQSourceOptions.CONSUMER_GROUP);
+
+        requiredOptions.add(RocketMQSourceOptions.ENDPOINTS);
         return requiredOptions;
     }
 

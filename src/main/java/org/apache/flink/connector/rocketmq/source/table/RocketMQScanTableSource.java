@@ -39,6 +39,8 @@ import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.types.DataType;
 
+import org.apache.commons.lang3.StringUtils;
+
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -221,12 +223,20 @@ public class RocketMQScanTableSource implements ScanTableSource, SupportsReading
         consumerProps.setProperty(RocketMQConfig.CONSUMER_TOPIC, topic);
         consumerProps.setProperty(RocketMQConfig.CONSUMER_GROUP, consumerGroup);
         consumerProps.setProperty(RocketMQConfig.NAME_SERVER_ADDR, nameServerAddress);
-        consumerProps.setProperty(RocketMQConfig.CONSUMER_TAG, tag);
-        consumerProps.setProperty(RocketMQConfig.CONSUMER_SQL, sql);
+        if (StringUtils.isNotEmpty(tag)) {
+            consumerProps.setProperty(RocketMQConfig.CONSUMER_TAG, tag);
+        }
+        if (StringUtils.isNotEmpty(sql)) {
+            consumerProps.setProperty(RocketMQConfig.CONSUMER_SQL, sql);
+        }
         consumerProps.setProperty(
                 RocketMQConfig.CONSUMER_START_MESSAGE_OFFSET, String.valueOf(startMessageOffset));
-        consumerProps.setProperty(RocketMQConfig.ACCESS_KEY, accessKey);
-        consumerProps.setProperty(RocketMQConfig.SECRET_KEY, secretKey);
+        if (StringUtils.isNotEmpty(accessKey)) {
+            consumerProps.setProperty(RocketMQConfig.ACCESS_KEY, accessKey);
+        }
+        if (StringUtils.isNotEmpty(secretKey)) {
+            consumerProps.setProperty(RocketMQConfig.SECRET_KEY, secretKey);
+        }
         return consumerProps;
     }
 

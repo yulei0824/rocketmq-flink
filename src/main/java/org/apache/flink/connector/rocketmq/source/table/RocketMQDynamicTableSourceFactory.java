@@ -82,6 +82,8 @@ public class RocketMQDynamicTableSourceFactory implements DynamicTableSourceFact
         optionalOptions.add(RocketMQSourceOptions.OPTIONAL_ACCESS_KEY);
         optionalOptions.add(RocketMQSourceOptions.OPTIONAL_SECRET_KEY);
         optionalOptions.add(RocketMQSourceOptions.OPTIONAL_STARTUP_SCAN_MODE);
+
+        optionalOptions.add(RocketMQSourceOptions.OPTIONAL_USE_NEW_API);
         return optionalOptions;
     }
 

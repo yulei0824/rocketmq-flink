@@ -49,6 +49,12 @@ public class RocketMQSourceOptions extends RocketMQOptions {
                     .noDefaultValue()
                     .withDescription("The name of the subscribe topic");
 
+    public static final ConfigOption<String> OPTIONAL_FORMAT =
+            ConfigOptions.key(CONSUMER_PREFIX + "format")
+                    .stringType()
+                    .defaultValue("csv")
+                    .withDescription("The format of the message");
+
     public static final ConfigOption<Boolean> OPTIONAL_USE_NEW_API =
             ConfigOptions.key(CONSUMER_PREFIX + "api.new.enable").booleanType().defaultValue(true);
 

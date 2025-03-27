@@ -144,7 +144,10 @@ public class RocketMQScanTableSource implements ScanTableSource, SupportsReading
         } else {
             return SourceFunctionProvider.of(
                     new RocketMQSourceFunction<>(
-                            createKeyValueDeserializationSchema(), getConsumerProps()),
+                            createKeyValueDeserializationSchema(),
+                            getConsumerProps(),
+                            consumerOffsetMode,
+                            consumerOffsetTimestamp),
                     isBounded());
         }
     }

@@ -146,7 +146,7 @@ public class RocketMQOptions {
     public static final ConfigOption<String> OPTIONAL_LENGTH_CHECK =
             ConfigOptions.key(CLIENT_CONFIG_PREFIX + "message.length.check")
                     .stringType()
-                    .defaultValue("NONE");
+                    .defaultValue("PAD");
 
     // the config of session credential
     public static final ConfigOption<String> OPTIONAL_ACCESS_KEY =

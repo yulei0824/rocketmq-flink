@@ -144,6 +144,22 @@ public class RocketMQSourceFunction<OUT> extends RichParallelSourceFunction<OUT>
         this.props = props;
     }
 
+    public RocketMQSourceFunction(
+            KeyValueDeserializationSchema<OUT> schema,
+            Properties props,
+            String consumerOffsetMode,
+            long consumerOffsetTimestamp) {
+        this(schema, props);
+
+        if (consumerOffsetMode.equalsIgnoreCase(RocketMQConfig.CONSUMER_OFFSET_LATEST)) {
+            setStartFromLatest();
+        } else if (consumerOffsetMode.equalsIgnoreCase(RocketMQConfig.CONSUMER_OFFSET_EARLIEST)) {
+            setStartFromEarliest();
+        } else if (consumerOffsetMode.equalsIgnoreCase(RocketMQConfig.CONSUMER_OFFSET_TIMESTAMP)) {
+            setStartFromTimeStamp(consumerOffsetTimestamp);
+        }
+    }
+
     @Override
     public void open(Configuration parameters) throws Exception {
         log.debug("source open....");

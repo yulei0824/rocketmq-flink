@@ -17,20 +17,21 @@
 package org.apache.flink.connector.rocketmq.legacy.common.serialization;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.rocketmq.source.RocketMQSourceOptions;
 import org.apache.flink.connector.rocketmq.source.reader.deserializer.DirtyDataStrategy;
 import org.apache.flink.connector.rocketmq.source.util.ByteSerializer;
 import org.apache.flink.connector.rocketmq.source.util.StringSerializer;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.Preconditions;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import org.apache.commons.lang3.StringEscapeUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -40,6 +41,7 @@ import java.io.UnsupportedEncodingException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * * The row based implementation of {@link KeyValueDeserializationSchema} for the deserialization
@@ -55,6 +57,9 @@ public class RowKeyValueDeserializationSchema implements KeyValueDeserialization
     private final DirtyDataStrategy formatErrorStrategy;
     private final DirtyDataStrategy fieldMissingStrategy;
     private final DirtyDataStrategy fieldIncrementStrategy;
+
+    private final String format;
+
     private final String encoding;
     private final String fieldDelimiter;
     private final boolean columnErrorDebug;
@@ -67,11 +72,22 @@ public class RowKeyValueDeserializationSchema implements KeyValueDeserialization
 
     private static final int DEFAULT_LOG_INTERVAL_MS = 60 * 1000;
 
+    private static final String FORMAT_CSV = "csv";
+    private static final String FORMAT_JSON = "json";
+
+    private static String checkFormat(String format) {
+        Preconditions.checkArgument(
+                format.equalsIgnoreCase(FORMAT_CSV) || format.equalsIgnoreCase(FORMAT_JSON),
+                "Only support csv or json format");
+        return format;
+    }
+
     public RowKeyValueDeserializationSchema(
             TableSchema tableSchema,
             DirtyDataStrategy formatErrorStrategy,
             DirtyDataStrategy fieldMissingStrategy,
             DirtyDataStrategy fieldIncrementStrategy,
+            String format,
             String encoding,
             String fieldDelimiter,
             boolean columnErrorDebug,
@@ -81,6 +97,9 @@ public class RowKeyValueDeserializationSchema implements KeyValueDeserialization
         this.fieldMissingStrategy = fieldMissingStrategy;
         this.fieldIncrementStrategy = fieldIncrementStrategy;
         this.columnErrorDebug = columnErrorDebug;
+
+        this.format = checkFormat(format);
+
         this.encoding = encoding;
         this.fieldDelimiter = StringEscapeUtils.unescapeJava(fieldDelimiter);
         this.columnSize = tableSchema.getFieldNames().length;
@@ -95,8 +114,6 @@ public class RowKeyValueDeserializationSchema implements KeyValueDeserialization
             this.fieldTypes[index] = type;
         }
 
-        DescriptorProperties descriptorProperties = new DescriptorProperties();
-        descriptorProperties.putProperties(properties);
         this.fieldDataTypes = tableSchema.getFieldDataTypes();
         this.lastLogExceptionTime = System.currentTimeMillis();
         this.lastLogHandleFieldTime = System.currentTimeMillis();
@@ -136,7 +153,18 @@ public class RowKeyValueDeserializationSchema implements KeyValueDeserialization
         } catch (UnsupportedEncodingException e) {
             throw new RuntimeException(e);
         }
+        if (format.equalsIgnoreCase(FORMAT_CSV)) {
+            return deserializeValueFromCsv(body);
+        } else if (format.equalsIgnoreCase(FORMAT_JSON)) {
+            return deserializeValueFromJson(body);
+        } else {
+            throw new RuntimeException(String.format("Do not support to parse %s message", format));
+        }
+    }
+
+    private RowData deserializeValueFromCsv(String body) {
         String[] data = StringUtils.splitPreserveAllTokens(body, fieldDelimiter);
+
         if (columnSize == 1) {
             data = new String[1];
             data[0] = body;
@@ -169,6 +197,48 @@ public class RowKeyValueDeserializationSchema implements KeyValueDeserialization
             return null;
         }
         return rowData;
+    }
+
+    private RowData deserializeValueFromJson(String body) {
+        JSONObject dataJson = JSON.parseObject(body);
+        GenericRowData rowData = new GenericRowData(columnSize);
+        boolean skip = false;
+        for (int index = 0; index < columnSize; index++) {
+            try {
+                Optional<String> fieldName = tableSchema.getFieldName(index);
+                String fieldValue = dataJson.getString(fieldName.get());
+
+                if (fieldValue == null) {
+                    switch (fieldMissingStrategy) {
+                        case EXCEPTION:
+                            throw new RuntimeException(
+                                    String.format(
+                                            "The message misses the field %s: %s",
+                                            fieldName, body));
+                        case SKIP:
+                            skip = true;
+                            break;
+                    }
+                    if (skip) {
+                        break;
+                    }
+                }
+
+                rowData.setField(
+                        index,
+                        StringSerializer.deserialize(
+                                fieldValue,
+                                fieldTypes[index],
+                                fieldDataTypes[index],
+                                new HashSet<>()));
+            } catch (Exception e) {
+                if (handleException(rowData, index, dataJson.values().toArray(), e)) {
+                    break;
+                }
+            }
+        }
+
+        return !skip ? rowData : null;
     }
 
     private String getValue(String[] data, String line, int index) {
@@ -294,6 +364,8 @@ public class RowKeyValueDeserializationSchema implements KeyValueDeserialization
         private boolean columnErrorDebug = false;
         private Map<String, String> properties;
 
+        private String format = "csv";
+
         public Builder() {}
 
         public Builder setTableSchema(TableSchema tableSchema) {
@@ -331,16 +403,21 @@ public class RowKeyValueDeserializationSchema implements KeyValueDeserialization
             return this;
         }
 
+        public Builder setFormat(String format) {
+            this.format = checkFormat(format);
+            return this;
+        }
+
         public Builder setProperties(Map<String, String> properties) {
             this.properties = properties;
-            if (null == properties) {
-                return this;
-            }
             Configuration configuration = new Configuration();
-            for (String key : properties.keySet()) {
-                configuration.setString(key, properties.get(key));
+            if (properties != null) {
+                for (String key : properties.keySet()) {
+                    configuration.setString(key, properties.get(key));
+                }
             }
-            String lengthCheck = configuration.get(CollectorOption.LENGTH_CHECK);
+            String lengthCheck =
+                    configuration.getString(RocketMQSourceOptions.OPTIONAL_LENGTH_CHECK);
             switch (lengthCheck.toUpperCase()) {
                 case "SKIP":
                     {
@@ -372,9 +449,13 @@ public class RowKeyValueDeserializationSchema implements KeyValueDeserialization
                     break;
                 default:
             }
-            this.setEncoding(configuration.getString(CollectorOption.ENCODING));
-            this.setFieldDelimiter(configuration.getString(CollectorOption.FIELD_DELIMITER));
-            this.setColumnErrorDebug(configuration.getBoolean(CollectorOption.COLUMN_ERROR_DEBUG));
+            this.setEncoding(configuration.getString(RocketMQSourceOptions.OPTIONAL_ENCODING));
+            this.setFieldDelimiter(
+                    configuration.getString(RocketMQSourceOptions.OPTIONAL_FIELD_DELIMITER));
+            this.setColumnErrorDebug(
+                    configuration.getBoolean(RocketMQSourceOptions.OPTIONAL_COLUMN_ERROR_DEBUG));
+
+            this.setFormat(configuration.getString(RocketMQSourceOptions.OPTIONAL_FORMAT));
             return this;
         }
 
@@ -384,22 +465,11 @@ public class RowKeyValueDeserializationSchema implements KeyValueDeserialization
                     formatErrorStrategy,
                     fieldMissingStrategy,
                     fieldIncrementStrategy,
+                    format,
                     encoding,
                     fieldDelimiter,
                     columnErrorDebug,
                     properties);
         }
-    }
-
-    /** Options for {@link RowKeyValueDeserializationSchema}. */
-    public static class CollectorOption {
-        public static final ConfigOption<String> ENCODING =
-                ConfigOptions.key("encoding".toLowerCase()).defaultValue("UTF-8");
-        public static final ConfigOption<String> FIELD_DELIMITER =
-                ConfigOptions.key("fieldDelimiter".toLowerCase()).defaultValue("\u0001");
-        public static final ConfigOption<Boolean> COLUMN_ERROR_DEBUG =
-                ConfigOptions.key("columnErrorDebug".toLowerCase()).defaultValue(true);
-        public static final ConfigOption<String> LENGTH_CHECK =
-                ConfigOptions.key("lengthCheck".toLowerCase()).defaultValue("NONE");
     }
 }
